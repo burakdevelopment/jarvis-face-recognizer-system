@@ -1,178 +1,83 @@
-# JARVIS Face Recognizer System
+# 🛡️ Jarvis Face Recognizer System JarvisFRS
 
-**AI-Powered Smart Door & Face Recognition Security System**
+![Python](https://img.shields.io/badge/Python-3.8%2B-blue) ![Security](https://img.shields.io/badge/Security-RAM%20Only-green) ![License](https://img.shields.io/badge/License-MIT-orange) ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Raspberry%20Pi-grey)
 
-**JARVIS Face Recognizer System** is a professional-grade, real-time face recognition security system designed for smart door and access control applications.
-It leverages **Computer Vision** and **Deep Learning** techniques to detect, recognize, and interact with visitors in real time.
+<img width="736" height="597" alt="image" src="https://github.com/user-attachments/assets/4c66b73b-fdc0-4289-a6cb-8ca926b98e30" />
 
-The system distinguishes between **known residents** and **unknown visitors**, provides **natural voice feedback** using **Google Text-to-Speech (gTTS)**, and includes an intelligent **automatic face registration workflow**.
+**JarvisFRS** is a privacy-focused, real-time face recognition and greeting system designed for secure environments (schools, offices, private facilities). 
 
-![image1](https://github.com/user-attachments/assets/16c152fb-4e74-4e46-a0b0-3e370a9b7d1f)
----
-![image2](https://github.com/user-attachments/assets/6e4552ed-7318-4683-9c7f-161491c6235c)
-
-**Repository:**
-[https://github.com/burakdevelopment/jarvis-face-recognizer-system](https://github.com/burakdevelopment/jarvis-face-recognizer-system)
-
----
+Unlike traditional surveillance systems, **JarvisFRS operates strictly in Volatile Memory (RAM)**. It creates temporary biometric profiles for visitors that are automatically destroyed when the system shuts down, ensuring compliance with strict privacy regulations (GDPR/KVKK).
 
 ## 🌟 Key Features
 
-### 🔍 Face Recognition
+### 🔒 Privacy & Security First
+* **Volatile Memory Storage:** No face data or images are ever written to the hard disk. All biometric encodings reside in RAM.
+* **Secure Audio Handling:** Generated speech files are cached in memory using **SHA-256** hashing, preventing file system clutter and data persistence.
+* **Automatic Data Purge:** Upon termination, all visitor data is instantly wiped.
 
-* Real-time face detection and recognition
-* Uses **HOG (Histogram of Oriented Gradients)** for fast detection
-* Optimized for low-power devices (Raspberry Pi)
+### 🧠 Intelligent Logic
+* **Smart Crowd Greeting:** Detects groups of people and issues a **single** welcome message ("Hello, welcome to our school...") to avoid repetitive audio spam. It resets only when the area is clear.
+* **5-Second Registration Rule:** To prevent false positives, a visitor must look at the camera stably for 5 seconds before being registered as a "Guest" in the temporary session.
+* **Anti-Jitter Tracking:** Includes a movement threshold algorithm to maintain tracking even if the visitor moves their head slightly.
 
-### 🔊 Smart Audio Feedback
-
-* Natural voice output via **Google Text-to-Speech (gTTS)**
-* Asynchronous audio processing (no video freezing)
-* Local **audio caching** for offline use after first generation
-
-### 🧠 Intelligent Visitor Registration
-
-* Automatic detection of unknown visitors
-* Camera-facing prompt with visual countdown
-* Movement-tolerant registration logic
-* High-quality face crop saving
-
-### 👥 Multi-Person Logic
-
-* Unknown visitors are prioritized
-* Handles multiple faces in the same frame
-
-### ⚡ Performance Optimizations
-
-* Frame skipping to reduce CPU load
-* Dynamic frame scaling for higher FPS
-* Raspberry Pi 4 / 5 compatible
-
----
+### ⚡ Performance Optimized
+* **Frame Skipping:** Processes facial recognition every N frames (configurable) to reduce CPU usage by up to 60%.
+* **Dynamic Resolution:** Processing is done on a scaled-down frame, while the GUI output is rendered at a crisp **1184x659** resolution.
+* **Async Audio:** Audio playback runs on separate threads to ensure the video feed never freezes.
 
 ## 🛠️ Hardware Requirements
 
-* **PC:** Any system with Python 3.x
-* **Raspberry Pi:** 4B (4GB / 8GB recommended) or Pi 5
-* **Camera:** USB Webcam or Raspberry Pi Camera Module
-* **Audio:** 3.5mm jack or USB speakers
-* **Network:** Required only for first-time TTS generation
-
----
+* **PC:** Windows, macOS, or Linux with Python 3.x installed.
+* **Raspberry Pi:** Model 4B (4GB/8GB) or Pi 5 recommended.
+* **Camera:** USB Webcam or Raspberry Pi Camera Module.
+* **Internet:** Required only for the *initial* generation of speech synthesis (gTTS).
 
 ## 📦 Installation
 
-### Clone Repository
+### 1. Clone the Repository and Install Dependencies
 
 ```bash
-git clone https://github.com/burakdevelopment/jarvis-face-recognizer-system.git
+git clone https://github.com/burakdevelopment/jarvis-face-recognizer-system
 cd jarvis-face-recognizer-system
-```
-
----
-
-### PC Installation (Windows / Linux / macOS)
-
-```bash
 pip install -r requirements.txt
 ```
 
-> **Windows:** Visual Studio C++ Build Tools required for `dlib`
 
----
-
-### Raspberry Pi Installation
+### 2. Install Dependencies (Raspberry Pi / Linux)
 
 ```bash
-sudo apt update
-sudo apt upgrade
-
-sudo apt install -y build-essential cmake pkg-config
-sudo apt install -y libopenblas-dev liblapack-dev
-sudo apt install -y libx11-dev libgtk-3-dev
-sudo apt install -y python3-dev
-
+sudo apt-get update
+sudo apt-get install build-essential cmake pkg-config
+sudo apt-get install libopenblas-dev liblapack-dev
+sudo apt-get install libx11-dev libgtk-3-dev python3-dev
 pip3 install -r requirements.txt
 ```
 
-> `dlib` installation may take 30–60 minutes.
-
----
-
 ## 🚀 Usage
-
-### Add Known Faces (Optional)
-
-```
-known_faces/
-├── Burak.jpg
-├── John.png
-```
-
-### Run System
 
 ```bash
 python main.py
 ```
-
-### Exit
-
-Press `q` while video window is active.
-
----
+* To Quit: Press q on the keyboard while the window is active.
+* Note: Since this is a RAM-only system, all registered "Person X" identities will be reset every time you restart the application.
 
 ## ⚙️ Configuration
 
-```python
-self.REGISTRATION_TIME_REQ = 15
-self.GREETING_COOLDOWN = 20
-
-self.FRAME_SCALING = 0.5
-self.PROCESS_EVERY_N_FRAMES = 3
-self.MOVEMENT_THRESHOLD = 60
+* You can customize the system behavior by editing the Config class in main.py:
+```bash
+class Config:
+    REGISTRATION_TIME_REQ = 5      #seconds required to register a face
+    MOVEMENT_THRESHOLD = 50        #sensitivity for head movement
+    MSG_WELCOME = "Hello..."       #custom greeting text
+    PROCESS_EVERY_N_FRAMES = 2     #increase to 3 or 4 for slower CPUs (Raspberry Pi)
 ```
-
----
-
-## 📂 Project Structure
-
-```
-jarvis-face-recognizer-system/
-├── main.py
-├── requirements.txt
-├── known_faces/
-├── voice_cache/
-└── README.md
-```
-
----
 
 ## 🔧 Troubleshooting
 
-### Lag
-
-* Reduce `FRAME_SCALING`
-* Increase `PROCESS_EVERY_N_FRAMES`
-
-### dlib Error
-
-* Install `cmake`
-* Ensure C++ Build Tools on Windows
-
-### No Audio
-
-* Check audio drivers
-* Verify `voice_cache` permissions
-
----
+* "dlib" Installation Fail: Make sure you have installed CMake (pip install cmake) and, on Windows, Visual Studio Build Tools (C++).
+* Audio Stuttering: If running on very old hardware, increase PROCESS_EVERY_N_FRAMES to 3.
+* Camera Not Opening: Check CAMERA_INDEX = 0. Try changing it to 1 or 2 if you have multiple cameras.
 
 ## 📜 License
-MIT License
 
----
-
-## 👨‍💻 Developer
-
-**Burak**
-[https://github.com/burakdevelopment](https://github.com/burakdevelopment)
-
+**This project is licensed under the MIT License - see the LICENSE file for details.**
