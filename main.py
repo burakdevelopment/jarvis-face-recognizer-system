@@ -4,276 +4,291 @@ import os
 import threading
 import time
 import numpy as np
+import logging
+import io
+import hashlib
 from datetime import datetime
+from typing import List, Tuple, Optional, Any
 from gtts import gTTS
 import pygame
-import hashlib
 
-class AudioSystem:
+
+class Config:
     
+    CAMERA_INDEX = 0
+    DISPLAY_WIDTH = 1184
+    DISPLAY_HEIGHT = 659
+    FRAME_SCALING = 0.5  #0.5 = faster processing
+    PROCESS_EVERY_N_FRAMES = 2  #skip frames to reduce CPU load
+
+    
+    REGISTRATION_TIME_REQ = 5  #seconds to register a new face
+    MOVEMENT_THRESHOLD = 50    #pixel distance to consider "stable"
+    MISSING_FACE_TOLERANCE = 10 #frames to wait before resetting timer
+    FACE_MATCH_TOLERANCE = 0.5 #lower is stricter
+
+    MSG_WELCOME = "Hello, welcome..."
+    MSG_SCANNING = "Scanning..."
+    
+    LOG_FORMAT = '%(asctime)s - %(levelname)s - %(message)s'
+
+
+logging.basicConfig(level=logging.INFO, format=Config.LOG_FORMAT)
+logger = logging.getLogger("JarvisFRS")
+
+class SecureAudioHandler:
     def __init__(self):
-        self.CACHE_DIR = "voice_cache"
-        if not os.path.exists(self.CACHE_DIR):
-            os.makedirs(self.CACHE_DIR)
-        
-        
         try:
+            
             pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=4096)
-        except pygame.error:
-            print("[Ses Hatası] Ses kartı bulunamadı veya meşgul.")
+            logger.info("Audio system initialized successfully.")
+        except pygame.error as e:
+            logger.error(f"Audio device not found: {e}")
 
         self.is_playing = False
+        self.audio_cache = {} 
+        
+        
+        self._preload_audio(Config.MSG_WELCOME)
 
-    def _play_thread(self, filepath):
+    def _preload_audio(self, text: str):
+        try:
+            
+            msg_hash = hashlib.sha256(text.encode()).hexdigest()
+            
+            if msg_hash not in self.audio_cache:
+                tts = gTTS(text=text, lang='en') 
+                fp = io.BytesIO()
+                tts.write_to_fp(fp)
+                fp.seek(0)
+                self.audio_cache[msg_hash] = fp.read()
+                logger.debug(f"Audio cached in RAM: '{text}'")
+        except Exception as e:
+            logger.error(f"Failed to synthesize audio: {e}")
+
+    def _play_thread(self, audio_bytes: bytes):
         self.is_playing = True
         try:
-            pygame.mixer.music.load(filepath)
+            sound_data = io.BytesIO(audio_bytes)
+            pygame.mixer.music.load(sound_data)
             pygame.mixer.music.play()
             while pygame.mixer.music.get_busy():
                 time.sleep(0.1)
         except Exception as e:
-            print(f"[Ses Oynatma Hatası]: {e}")
-        self.is_playing = False
+            logger.error(f"Playback error: {e}")
+        finally:
+            self.is_playing = False
 
-    def speak(self, text):
-        
+    def speak(self, text: str):
         if self.is_playing:
-            return  
+            return
 
+        msg_hash = hashlib.sha256(text.encode()).hexdigest()
         
-        filename = hashlib.md5(text.encode()).hexdigest() + ".mp3"
-        filepath = os.path.join(self.CACHE_DIR, filename)
-
-        if not os.path.exists(filepath):
-            print(f"[Ses] Yeni ses oluşturuluyor: '{text}'")
-            try:
-                tts = gTTS(text=text, lang='tr')
-                tts.save(filepath)
-            except Exception as e:
-                print(f"[İnternet Hatası] Ses oluşturulamadı: {e}")
-                return
-
         
-        threading.Thread(target=self._play_thread, args=(filepath,), daemon=True).start()
+        if msg_hash not in self.audio_cache:
+            self._preload_audio(text)
+        
+        if msg_hash in self.audio_cache:
+            threading.Thread(target=self._play_thread, 
+                             args=(self.audio_cache[msg_hash],), 
+                             daemon=True).start()
 
-class SmartDoorSystem:
+class SmartGuardian:
     def __init__(self):
-        
-        self.KNOWN_FACES_DIR = "known_faces"
-        self.REGISTRATION_TIME_REQ = 15
-        self.GREETING_COOLDOWN = 20
+        self.known_face_encodings: List[np.ndarray] = []
+        self.known_face_names: List[str] = []
         
         
-        self.FRAME_SCALING = 0.5            
-        self.PROCESS_EVERY_N_FRAMES = 3     
-        self.MOVEMENT_THRESHOLD = 60        
-        self.MISSING_FACE_TOLERANCE = 10    
-
-        
-        self.known_face_encodings = []
-        self.known_face_names = []
-        
+        self.person_counter = 1
         self.unknown_timer_start = None
         self.last_unknown_center = None
-        self.missing_face_counter = 0       
-        
-        self.last_greeted_time = {}
+        self.missing_face_counter = 0
         
         
-        if not os.path.exists(self.KNOWN_FACES_DIR):
-            os.makedirs(self.KNOWN_FACES_DIR)
-            
+        self.welcome_message_delivered = False
         
-        self.audio = AudioSystem()
-        self.load_known_faces()
+        
+        self.audio = SecureAudioHandler()
+        
+        logger.info("System Ready. Mode: Volatile Storage (RAM Only).")
 
+    def register_face_memory(self, face_encoding: np.ndarray) -> str:
+        new_name = f"Person {self.person_counter}"
+        self.known_face_encodings.append(face_encoding)
+        self.known_face_names.append(new_name)
+        self.person_counter += 1
         
-        self.audio.speak("Sistem başlatıldı.")
-
-    def load_known_faces(self):
-        print("[Sistem] Yüz veritabanı yükleniyor...")
-        self.known_face_encodings = []
-        self.known_face_names = []
-        
-        for filename in os.listdir(self.KNOWN_FACES_DIR):
-            if filename.endswith((".jpg", ".png", ".jpeg")):
-                path = os.path.join(self.KNOWN_FACES_DIR, filename)
-                image = face_recognition.load_image_file(path)
-                encodings = face_recognition.face_encodings(image)
-                if encodings:
-                    self.known_face_encodings.append(encodings[0])
-                    name = os.path.splitext(filename)[0].split('_')[0].capitalize()
-                    self.known_face_names.append(name)
-        print(f"[Sistem] {len(self.known_face_names)} kişi yüklendi.")
-
-    def save_new_face(self, frame, face_location):
-        top, right, bottom, left = face_location
-        scale = int(1/self.FRAME_SCALING)
-        margin = 30
-        
-        h, w, _ = frame.shape
-        top = max(0, (top * scale) - margin)
-        left = max(0, (left * scale) - margin)
-        bottom = min(h, (bottom * scale) + margin)
-        right = min(w, (right * scale) + margin)
-        
-        face_image = frame[top:bottom, left:right]
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"Misafir_{timestamp}.jpg"
-        
-        save_path = os.path.join(self.KNOWN_FACES_DIR, filename)
-        cv2.imwrite(save_path, face_image)
-        
-        
-        self.load_known_faces() 
-        self.audio.speak("Teşekkürler. Yüzünüz başarıyla kaydedildi.")
-        return True
+        logger.info(f"New identity registered in volatile memory: {new_name}")
+        return new_name
 
     def run(self):
-        video_capture = cv2.VideoCapture(0)
+        video_capture = cv2.VideoCapture(Config.CAMERA_INDEX)
+        
         video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+        if not video_capture.isOpened():
+            logger.critical("Cannot open camera.")
+            return
 
         frame_count = 0
         
         
         current_face_locations = []
         current_face_names = []
-        current_knowns = []
-        current_unknown_loc = None 
+        current_unknown_data = [] 
 
-        print("[Sistem] Aktif.")
+        logger.info("Surveillance started. Press 'q' to exit.")
 
-        while True:
-            ret, frame = video_capture.read()
-            if not ret:
-                break
-            
-            
-            if frame_count % self.PROCESS_EVERY_N_FRAMES == 0:
+        try:
+            while True:
+                ret, frame = video_capture.read()
+                if not ret:
+                    logger.warning("Failed to grab frame.")
+                    break
                 
                 
-                small_frame = cv2.resize(frame, (0, 0), fx=self.FRAME_SCALING, fy=self.FRAME_SCALING)
-                rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-                
-                
-                current_face_locations = face_recognition.face_locations(rgb_small_frame)
-                current_face_encodings = face_recognition.face_encodings(rgb_small_frame, current_face_locations)
-
-                current_face_names = []
-                current_knowns = []
-                temp_unknown_locs = []
-
-                
-                for idx, face_encoding in enumerate(current_face_encodings):
-                    matches = face_recognition.compare_faces(self.known_face_encodings, face_encoding, tolerance=0.5)
-                    name = "Tanimsiz"
-
-                    if True in matches:
-                        first_match_index = matches.index(True)
-                        name = self.known_face_names[first_match_index]
-                        current_knowns.append(name)
-                    else:
-                        temp_unknown_locs.append(current_face_locations[idx])
-
-                    current_face_names.append(name)
-                
-                
-                current_unknown_loc = None
-                if temp_unknown_locs:
+                if frame_count % Config.PROCESS_EVERY_N_FRAMES == 0:
                     
-                    current_unknown_loc = max(temp_unknown_locs, key=lambda loc: (loc[2]-loc[0]) * (loc[1]-loc[3]))
-
-            frame_count += 1
-
-            
-            current_time = time.time()
-
-            
-            for name in current_knowns:
-                if current_time - self.last_greeted_time.get(name, 0) > self.GREETING_COOLDOWN:
-                    msg = f"Merhaba tekrardan hoşgeldiniz efendim."
                     
-                    if current_unknown_loc:
-                        msg += " Yanınızdaki misafir için kayıt işlemi gerekiyor."
-                    self.audio.speak(msg)
-                    self.last_greeted_time[name] = current_time
-
-            
-            if current_unknown_loc:
-                
-                self.missing_face_counter = 0
-                
-                top, right, bottom, left = current_unknown_loc
-                center_x, center_y = (left + right) / 2, (top + bottom) / 2
-                
-                
-                if current_time - self.last_greeted_time.get("Tanimsiz", 0) > self.GREETING_COOLDOWN:
-                    if not current_knowns: 
-                        self.audio.speak("Merhaba hoşgeldiniz. Yüzünüzü tanıtmak için lütfen sabit durun.")
-                    self.last_greeted_time["Tanimsiz"] = current_time
-
-                
-                is_stable = False
-                if self.last_unknown_center:
-                    prev_x, prev_y = self.last_unknown_center
-                    dist = np.sqrt((center_x - prev_x)**2 + (center_y - prev_y)**2)
+                    small_frame = cv2.resize(frame, (0, 0), fx=Config.FRAME_SCALING, fy=Config.FRAME_SCALING)
+                    rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
                     
-                    if dist < self.MOVEMENT_THRESHOLD:
-                        is_stable = True
+                    
+                    current_face_locations = face_recognition.face_locations(rgb_small_frame)
+                    current_face_encodings = face_recognition.face_encodings(rgb_small_frame, current_face_locations)
+
+                    current_face_names = []
+                    current_unknown_data = [] 
+
+                    
+                    if len(current_face_locations) > 0:
+                        
+                        if not self.welcome_message_delivered:
+                            logger.info("Visitor detected. Playing welcome message.")
+                            self.audio.speak(Config.MSG_WELCOME)
+                            self.welcome_message_delivered = True
                     else:
                         
-                        pass
+                        if self.welcome_message_delivered:
+                            logger.info("Area cleared. Resetting greeting trigger.")
+                            self.welcome_message_delivered = False
+
+                    
+                    for idx, face_encoding in enumerate(current_face_encodings):
+                        matches = face_recognition.compare_faces(self.known_face_encodings, 
+                                                               face_encoding, 
+                                                               tolerance=Config.FACE_MATCH_TOLERANCE)
+                        name = "Unknown"
+
+                        if True in matches:
+                            first_match_index = matches.index(True)
+                            name = self.known_face_names[first_match_index]
+                        else:
+                            
+                            current_unknown_data.append((current_face_locations[idx], face_encoding))
+
+                        current_face_names.append(name)
+
+                frame_count += 1
+                current_time = time.time()
+
                 
-                self.last_unknown_center = (center_x, center_y)
+                target_unknown = None
+                if current_unknown_data:
+                    
+                    target_unknown = max(current_unknown_data, 
+                                       key=lambda x: (x[0][2]-x[0][0]) * (x[0][1]-x[0][3]))
 
-                if is_stable:
-                    if self.unknown_timer_start is None:
-                        self.unknown_timer_start = current_time
+                if target_unknown:
+                    self.missing_face_counter = 0
+                    u_loc, u_enc = target_unknown
                     
-                    elapsed = current_time - self.unknown_timer_start
-                    remaining = int(self.REGISTRATION_TIME_REQ - elapsed)
+                    top, right, bottom, left = u_loc
+                    center_x, center_y = (left + right) / 2, (top + bottom) / 2
                     
                     
-                    scale = int(1/self.FRAME_SCALING)
-                    cv2.putText(frame, f"SABIT DURUN: {remaining}", (50, 50), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
+                    is_stable = False
+                    if self.last_unknown_center:
+                        prev_x, prev_y = self.last_unknown_center
+                        dist = np.sqrt((center_x - prev_x)**2 + (center_y - prev_y)**2)
+                        
+                        if dist < Config.MOVEMENT_THRESHOLD:
+                            is_stable = True
+                    
+                    self.last_unknown_center = (center_x, center_y)
 
-                    if elapsed >= self.REGISTRATION_TIME_REQ:
-                        if self.save_new_face(frame, current_unknown_loc):
-                            self.unknown_timer_start = None
-                            current_unknown_loc = None 
+                    if is_stable:
+                        if self.unknown_timer_start is None:
+                            self.unknown_timer_start = current_time
+                        
+                        elapsed = current_time - self.unknown_timer_start
+                        remaining = int(Config.REGISTRATION_TIME_REQ - elapsed)
+                        
+                        
+                        scale = int(1/Config.FRAME_SCALING)
+                        
+                        txt_loc = (left * scale, (top * scale) - 20)
+                        
+                    
+                        cv2.putText(frame, f"Registering: {remaining}s", txt_loc, 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+                        if elapsed >= Config.REGISTRATION_TIME_REQ:
+                            self.register_face_memory(u_enc)
+                            self.unknown_timer_start = None 
+                    else:
+                        pass
                 else:
                     
-                    pass
+                    self.missing_face_counter += 1
+                    if self.missing_face_counter > Config.MISSING_FACE_TOLERANCE:
+                        self.unknown_timer_start = None
+                        self.last_unknown_center = None
 
-            else:
                 
-                self.missing_face_counter += 1
-                if self.missing_face_counter > self.MISSING_FACE_TOLERANCE:
-                    self.unknown_timer_start = None
-                    self.last_unknown_center = None
+                for (top, right, bottom, left), name in zip(current_face_locations, current_face_names):
+                    scale = int(1/Config.FRAME_SCALING)
+                    top *= scale
+                    right *= scale
+                    bottom *= scale
+                    left *= scale
+                    
+                   
+                    color = (0, 255, 0) if name != "Unknown" else (0, 0, 255)
+                    
+                    
+                    cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
+                    
+                    
+                    cv2.rectangle(frame, (left, bottom - 30), (right, bottom), color, cv2.FILLED)
+                    cv2.putText(frame, name, (left + 6, bottom - 6), 
+                                cv2.FONT_HERSHEY_DUPLEX, 0.6, (255, 255, 255), 1)
 
+                
+                final_display = cv2.resize(frame, (Config.DISPLAY_WIDTH, Config.DISPLAY_HEIGHT))
+                
+                
+                cv2.putText(final_display, "JarvisFRS v1.0", (10, 30), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+                cv2.imshow('JarvisFRS', final_display)
+
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    logger.info("User requested shutdown.")
+                    break
+        
+        except Exception as e:
+            logger.critical(f"Unexpected crash: {e}")
+        finally:
             
-            for (top, right, bottom, left), name in zip(current_face_locations, current_face_names):
-                scale = int(1/self.FRAME_SCALING)
-                top *= scale
-                right *= scale
-                bottom *= scale
-                left *= scale
-                
-                color = (0, 255, 0) if name != "Tanimsiz" else (0, 0, 255)
-                cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
-                cv2.putText(frame, name, (left, bottom + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-
-            cv2.imshow('Giris Kamerasi', frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-
-        video_capture.release()
-        cv2.destroyAllWindows()
-        pygame.mixer.quit()
+            logger.info("releasing resources...")
+            video_capture.release()
+            cv2.destroyAllWindows()
+            pygame.mixer.quit()
+            logger.info("System shutdown complete.")
 
 if __name__ == "__main__":
-    app = SmartDoorSystem()
+    app = SmartGuardian()
     app.run()
